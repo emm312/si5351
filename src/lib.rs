@@ -321,7 +321,7 @@ impl OutputDivider {
             5 => Ok(OutputDivider::Div32),
             6 => Ok(OutputDivider::Div64),
             7 => Ok(OutputDivider::Div128),
-            _ => Err(Error::InvalidParameter)
+            _ => Err(Error::InvalidParameter),
         }
     }
 
@@ -365,8 +365,17 @@ pub trait Si5351 {
     fn init(&mut self, xtal_load: CrystalLoad) -> Result<(), Error>;
     fn read_device_status(&mut self) -> Result<DeviceStatusBits, Error>;
 
-    fn find_int_dividers_for_max_pll_freq(&self, max_pll_freq: u32, freq: u32) -> Result<(u16, OutputDivider), Error>;
-    fn find_pll_coeffs_for_dividers(&self, total_div: u32, denom: u32, freq: u32) -> Result<(u8, u32), Error>;
+    fn find_int_dividers_for_max_pll_freq(
+        &self,
+        max_pll_freq: u32,
+        freq: u32,
+    ) -> Result<(u16, OutputDivider), Error>;
+    fn find_pll_coeffs_for_dividers(
+        &self,
+        total_div: u32,
+        denom: u32,
+        freq: u32,
+    ) -> Result<(u8, u32), Error>;
 
     fn set_frequency(&mut self, pll: PLL, clk: ClockOutput, freq: u32) -> Result<(), Error>;
     fn set_clock_enabled(&mut self, clk: ClockOutput, enabled: bool);
@@ -376,8 +385,20 @@ pub trait Si5351 {
 
     fn setup_pll_int(&mut self, pll: PLL, mult: u8) -> Result<(), Error>;
     fn setup_pll(&mut self, pll: PLL, mult: u8, num: u32, denom: u32) -> Result<(), Error>;
-    fn setup_multisynth_int(&mut self, ms: Multisynth, mult: u16, r_div: OutputDivider) -> Result<(), Error>;
-    fn setup_multisynth(&mut self, ms: Multisynth, div: u16, num: u32, denom: u32, r_div: OutputDivider) -> Result<(), Error>;
+    fn setup_multisynth_int(
+        &mut self,
+        ms: Multisynth,
+        mult: u16,
+        r_div: OutputDivider,
+    ) -> Result<(), Error>;
+    fn setup_multisynth(
+        &mut self,
+        ms: Multisynth,
+        div: u16,
+        num: u32,
+        denom: u32,
+        r_div: OutputDivider,
+    ) -> Result<(), Error>;
     fn select_clock_pll(&mut self, clocl: ClockOutput, pll: PLL);
 
     fn set_phase_offset(&mut self, clk: ClockOutput, offset: u8) -> Result<(), Error>;
@@ -385,8 +406,8 @@ pub trait Si5351 {
 }
 
 impl<I2C, E> Si5351Device<I2C>
-    where
-        I2C: WriteRead<Error=E> + Write<Error=E>,
+where
+    I2C: WriteRead<Error = E> + Write<Error = E>,
 {
     /// Creates a new driver from a I2C peripheral
     pub fn new(i2c: I2C, address_bit: bool, xtal_freq: u32) -> Self {
@@ -406,7 +427,14 @@ impl<I2C, E> Si5351Device<I2C>
         Si5351Device::new(i2c, false, 25_000_000)
     }
 
-    fn write_ms_config<MS: FractionalMultisynth + Copy>(&mut self, ms: MS, int: u16, frac_num: u32, frac_denom: u32, r_div: OutputDivider) -> Result<(), Error> {
+    fn write_ms_config<MS: FractionalMultisynth + Copy>(
+        &mut self,
+        ms: MS,
+        int: u16,
+        frac_num: u32,
+        frac_denom: u32,
+        r_div: OutputDivider,
+    ) -> Result<(), Error> {
         if frac_denom == 0 {
             return Err(Error::InvalidParameter);
         }
@@ -433,16 +461,19 @@ impl<I2C, E> Si5351Device<I2C>
             p3 = frac_denom;
         }
 
-        self.write_synth_registers(ms, [
-            ((p3 & 0x0000FF00) >> 8) as u8,
-            p3 as u8,
-            ((p1 & 0x00030000) >> 16) as u8 | r_div.bits(),
-            ((p1 & 0x0000FF00) >> 8) as u8,
-            p1 as u8,
-            (((p3 & 0x000F0000) >> 12) | ((p2 & 0x000F0000) >> 16)) as u8,
-            ((p2 & 0x0000FF00) >> 8) as u8,
-            p2 as u8,
-        ])?;
+        self.write_synth_registers(
+            ms,
+            [
+                ((p3 & 0x0000FF00) >> 8) as u8,
+                p3 as u8,
+                ((p1 & 0x00030000) >> 16) as u8 | r_div.bits(),
+                ((p1 & 0x0000FF00) >> 8) as u8,
+                p1 as u8,
+                (((p3 & 0x000F0000) >> 12) | ((p2 & 0x000F0000) >> 16)) as u8,
+                ((p2 & 0x0000FF00) >> 8) as u8,
+                p2 as u8,
+            ],
+        )?;
 
         if frac_num == 0 {
             self.ms_int_mode_mask |= ms.ix();
@@ -454,33 +485,58 @@ impl<I2C, E> Si5351Device<I2C>
     }
 
     fn reset_pll(&mut self, pll: PLL) -> Result<(), Error> {
-        self.write_register(Register::PLLReset, match pll {
-            PLL::A => PLLResetBits::PLLA_RST.bits(),
-            PLL::B => PLLResetBits::PLLB_RST.bits(),
-        })?;
+        self.write_register(
+            Register::PLLReset,
+            match pll {
+                PLL::A => PLLResetBits::PLLA_RST.bits(),
+                PLL::B => PLLResetBits::PLLB_RST.bits(),
+            },
+        )?;
 
         Ok(())
     }
 
     fn read_register(&mut self, reg: Register) -> Result<u8, Error> {
         let mut buffer: [u8; 1] = [0];
-        self.i2c.write_read(self.address, &[reg.addr()], &mut buffer).map_err(i2c_error)?;
+        self.i2c
+            .write_read(self.address, &[reg.addr()], &mut buffer)
+            .map_err(i2c_error)?;
         Ok(buffer[0])
     }
 
     fn write_register(&mut self, reg: Register, byte: u8) -> Result<(), Error> {
-        self.i2c.write(self.address, &[reg.addr(), byte]).map_err(i2c_error)
+        self.i2c
+            .write(self.address, &[reg.addr(), byte])
+            .map_err(i2c_error)
     }
 
-    fn write_synth_registers<MS: FractionalMultisynth>(&mut self, ms: MS, params: [u8; 8]) -> Result<(), Error> {
-        self.i2c.write(self.address, &[ms.base_addr(),
-            params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7]
-        ]).map_err(i2c_error)
+    fn write_synth_registers<MS: FractionalMultisynth>(
+        &mut self,
+        ms: MS,
+        params: [u8; 8],
+    ) -> Result<(), Error> {
+        self.i2c
+            .write(
+                self.address,
+                &[
+                    ms.base_addr(),
+                    params[0],
+                    params[1],
+                    params[2],
+                    params[3],
+                    params[4],
+                    params[5],
+                    params[6],
+                    params[7],
+                ],
+            )
+            .map_err(i2c_error)
     }
 }
 
-impl<I2C, E> Si5351 for Si5351Device<I2C> where
-    I2C: WriteRead<Error=E> + Write<Error=E>
+impl<I2C, E> Si5351 for Si5351Device<I2C>
+where
+    I2C: WriteRead<Error = E> + Write<Error = E>,
 {
     fn init_adafruit_module(&mut self) -> Result<(), Error> {
         self.init(CrystalLoad::_10)
@@ -495,28 +551,45 @@ impl<I2C, E> Si5351 for Si5351Device<I2C> where
         }
 
         self.flush_output_enabled()?;
-        const CLK_REGS: [Register; 8] = [Register::Clk0, Register::Clk1,
-            Register::Clk2, Register::Clk3, Register::Clk4,
-            Register::Clk5, Register::Clk6, Register::Clk7];
+        const CLK_REGS: [Register; 8] = [
+            Register::Clk0,
+            Register::Clk1,
+            Register::Clk2,
+            Register::Clk3,
+            Register::Clk4,
+            Register::Clk5,
+            Register::Clk6,
+            Register::Clk7,
+        ];
         for &reg in CLK_REGS.iter() {
             self.write_register(reg, ClockControlBits::CLK_PDN.bits())?;
         }
 
-        self.write_register(Register::CrystalLoad,
-                            (CrystalLoadBits::RESERVED | match xtal_load {
-                                CrystalLoad::_6 => CrystalLoadBits::CL_6,
-                                CrystalLoad::_8 => CrystalLoadBits::CL_8,
-                                CrystalLoad::_10 => CrystalLoadBits::CL_10,
-                            }).bits())?;
+        self.write_register(
+            Register::CrystalLoad,
+            (CrystalLoadBits::RESERVED
+                | match xtal_load {
+                    CrystalLoad::_6 => CrystalLoadBits::CL_6,
+                    CrystalLoad::_8 => CrystalLoadBits::CL_8,
+                    CrystalLoad::_10 => CrystalLoadBits::CL_10,
+                })
+            .bits(),
+        )?;
 
         Ok(())
     }
 
     fn read_device_status(&mut self) -> Result<DeviceStatusBits, Error> {
-        Ok(DeviceStatusBits::from_bits_truncate(self.read_register(Register::DeviceStatus)?))
+        Ok(DeviceStatusBits::from_bits_truncate(
+            self.read_register(Register::DeviceStatus)?,
+        ))
     }
 
-    fn find_int_dividers_for_max_pll_freq(&self, max_pll_freq: u32, freq: u32) -> Result<(u16, OutputDivider), Error> {
+    fn find_int_dividers_for_max_pll_freq(
+        &self,
+        max_pll_freq: u32,
+        freq: u32,
+    ) -> Result<(u16, OutputDivider), Error> {
         let total_divider = (max_pll_freq / freq) as u16;
 
         let r_div = OutputDivider::min_divider(total_divider / 900)?;
@@ -529,7 +602,12 @@ impl<I2C, E> Si5351 for Si5351Device<I2C> where
         Ok((ms_div, r_div))
     }
 
-    fn find_pll_coeffs_for_dividers(&self, total_div: u32, denom: u32, freq: u32) -> Result<(u8, u32), Error> {
+    fn find_pll_coeffs_for_dividers(
+        &self,
+        total_div: u32,
+        denom: u32,
+        freq: u32,
+    ) -> Result<(u8, u32), Error> {
         if denom == 0 || denom > 0xfffff {
             return Err(Error::InvalidParameter);
         }
@@ -606,7 +684,10 @@ impl<I2C, E> Si5351 for Si5351Device<I2C> where
 
         let base = ClockControlBits::CLK_SRC_MS | ClockControlBits::CLK_DRV_8;
 
-        self.write_register(clk.register(), (clk_control_pdn | ms_int_mode | ms_src | base).bits())
+        self.write_register(
+            clk.register(),
+            (clk_control_pdn | ms_int_mode | ms_src | base).bits(),
+        )
     }
 
     fn setup_pll_int(&mut self, pll: PLL, mult: u8) -> Result<(), Error> {
@@ -618,18 +699,38 @@ impl<I2C, E> Si5351 for Si5351Device<I2C> where
             return Err(Error::InvalidParameter);
         }
 
-        self.write_ms_config(pll.multisynth(), mult.into(), num, denom, OutputDivider::Div1)?;
+        self.write_ms_config(
+            pll.multisynth(),
+            mult.into(),
+            num,
+            denom,
+            OutputDivider::Div1,
+        )?;
 
-        if mult % 2 == 0 && num == 0 {} else {}
+        if mult % 2 == 0 && num == 0 {
+        } else {
+        }
 
         Ok(())
     }
 
-    fn setup_multisynth_int(&mut self, ms: Multisynth, mult: u16, r_div: OutputDivider) -> Result<(), Error> {
+    fn setup_multisynth_int(
+        &mut self,
+        ms: Multisynth,
+        mult: u16,
+        r_div: OutputDivider,
+    ) -> Result<(), Error> {
         self.setup_multisynth(ms, mult, 0, 1, r_div)
     }
 
-    fn setup_multisynth(&mut self, ms: Multisynth, div: u16, num: u32, denom: u32, r_div: OutputDivider) -> Result<(), Error> {
+    fn setup_multisynth(
+        &mut self,
+        ms: Multisynth,
+        div: u16,
+        num: u32,
+        denom: u32,
+        r_div: OutputDivider,
+    ) -> Result<(), Error> {
         if div < 6 || div > 1800 {
             return Err(Error::InvalidParameter);
         }
@@ -655,7 +756,7 @@ impl<I2C, E> Si5351 for Si5351Device<I2C> where
             ClockOutput::Clk3 => Register::Clk3PhOff,
             ClockOutput::Clk4 => Register::Clk4PhOff,
             ClockOutput::Clk5 => Register::Clk5PhOff,
-            _ => return Err(Error::InvalidParameter)
+            _ => return Err(Error::InvalidParameter),
         };
         if offset & 0b00000001 == 1 {
             return Err(Error::InvalidParameter);
