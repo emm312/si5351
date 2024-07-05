@@ -84,7 +84,6 @@ clock.set_frequency(si5351::PLL::A, si5351::ClockOutput::Clk0, 14_175_000)?;
 extern crate bitflags;
 use embedded_hal as hal;
 
-use core::mem;
 use crate::hal::blocking::i2c::{Write, WriteRead};
 
 #[derive(Debug)]
@@ -227,6 +226,12 @@ enum Register {
     Clk5 = 21,
     Clk6 = 22,
     Clk7 = 23,
+    Clk0PhOff = 165,
+    Clk1PhOff = 166,
+    Clk2PhOff = 167,
+    Clk3PhOff = 168,
+    Clk4PhOff = 169,
+    Clk5PhOff = 170,
     PLLReset = 177,
     CrystalLoad = 183,
 }
@@ -338,6 +343,13 @@ fn i2c_error<E>(_: E) -> Error {
     Error::CommunicationError
 }
 
+pub enum Current {
+    Output2mA = 0b00,
+    Output4mA = 0b01,
+    Output6mA = 0b10,
+    Output8mA = 0b11,
+}
+
 /// Si5351 driver
 pub struct Si5351Device<I2C> {
     i2c: I2C,
@@ -367,6 +379,9 @@ pub trait Si5351 {
     fn setup_multisynth_int(&mut self, ms: Multisynth, mult: u16, r_div: OutputDivider) -> Result<(), Error>;
     fn setup_multisynth(&mut self, ms: Multisynth, div: u16, num: u32, denom: u32, r_div: OutputDivider) -> Result<(), Error>;
     fn select_clock_pll(&mut self, clocl: ClockOutput, pll: PLL);
+
+    fn set_phase_offset(&mut self, clk: ClockOutput, offset: u8) -> Result<(), Error>;
+    fn set_current(&mut self, clk: ClockOutput, current: Current) -> Result<(), Error>;
 }
 
 impl<I2C, E> Si5351Device<I2C>
@@ -448,7 +463,7 @@ impl<I2C, E> Si5351Device<I2C>
     }
 
     fn read_register(&mut self, reg: Register) -> Result<u8, Error> {
-        let mut buffer: [u8; 1] = unsafe { mem::uninitialized() };
+        let mut buffer: [u8; 1] = [0];
         self.i2c.write_read(self.address, &[reg.addr()], &mut buffer).map_err(i2c_error)?;
         Ok(buffer[0])
     }
@@ -630,5 +645,39 @@ impl<I2C, E> Si5351 for Si5351Device<I2C> where
             PLL::A => self.ms_src_mask &= !bit,
             PLL::B => self.ms_src_mask |= bit,
         }
+    }
+
+    fn set_phase_offset(&mut self, clk: ClockOutput, offset: u8) -> Result<(), Error> {
+        let reg = match clk {
+            ClockOutput::Clk0 => Register::Clk0PhOff,
+            ClockOutput::Clk1 => Register::Clk1PhOff,
+            ClockOutput::Clk2 => Register::Clk2PhOff,
+            ClockOutput::Clk3 => Register::Clk3PhOff,
+            ClockOutput::Clk4 => Register::Clk4PhOff,
+            ClockOutput::Clk5 => Register::Clk5PhOff,
+            _ => return Err(Error::InvalidParameter)
+        };
+        if offset & 0b00000001 == 1 {
+            return Err(Error::InvalidParameter);
+        }
+        self.write_register(reg, offset)?;
+        Ok(())
+    }
+
+    fn set_current(&mut self, clk: ClockOutput, current: Current) -> Result<(), Error> {
+        let reg = match clk {
+            ClockOutput::Clk0 => Register::Clk0,
+            ClockOutput::Clk1 => Register::Clk1,
+            ClockOutput::Clk2 => Register::Clk2,
+            ClockOutput::Clk3 => Register::Clk3,
+            ClockOutput::Clk4 => Register::Clk4,
+            ClockOutput::Clk5 => Register::Clk5,
+            ClockOutput::Clk6 => Register::Clk6,
+            ClockOutput::Clk7 => Register::Clk7,
+        };
+
+        self.write_register(reg, current as u8)?;
+
+        Ok(())
     }
 }
